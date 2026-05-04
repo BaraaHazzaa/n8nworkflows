@@ -1,0 +1,114 @@
+{
+  "name": "Email Conversations → PDF Export",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "export-email-conversations",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "name": "Webhook Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [240, 400],
+      "notes": "POST JSON body: { \"addresses\": [\"alice@example.com\", \"bob@example.com\"], \"output_path\": \"/exports/conversation.pdf\" }"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse and validate the incoming request\nconst body = $input.first().json.body ?? $input.first().json;\n\nif (!body.addresses || !Array.isArray(body.addresses) || body.addresses.length === 0) {\n  throw new Error('Request must include \"addresses\" array of email addresses to pull.');\n}\n\nconst addresses = body.addresses.map(a => a.trim().toLowerCase());\nconst outputPath = body.output_path ?? `/tmp/email_export_${Date.now()}.pdf`;\nconst maxResults = body.max_results ?? 200;\n\nreturn [{ json: { addresses, outputPath, maxResults, addressList: addresses.join(',') } }];"
+      },
+      "name": "Parse Request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [460, 400]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Build Gmail search query from the address list\n// This finds all emails FROM or TO any of the specified addresses\nconst addresses = $input.first().json.addresses;\n\nconst fromTerms = addresses.map(a => `from:${a}`);\nconst toTerms   = addresses.map(a => `to:${a}`);\nconst query = [...fromTerms, ...toTerms].join(' OR ');\n\nreturn [{ json: { ...$input.first().json, gmailQuery: query } }];"
+      },
+      "name": "Build Gmail Query",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [680, 400]
+    },
+    {
+      "parameters": {
+        "operation": "getAll",
+        "returnAll": false,
+        "limit": "={{ $json.maxResults }}",
+        "filters": {
+          "q": "={{ $json.gmailQuery }}"
+        },
+        "options": {
+          "format": "full"
+        }
+      },
+      "name": "Fetch Gmail Messages",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2,
+      "position": [900, 400],
+      "notes": "Requires Gmail OAuth2 credential. Fetches up to max_results messages matching the query."
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse raw Gmail message objects into clean structured data\nconst config = $('Parse Request').first().json;\n\nconst messages = [];\n\nfor (const item of $input.all()) {\n  const msg = item.json;\n\n  // Extract headers\n  const headers = {};\n  const rawHeaders = msg.payload?.headers ?? [];\n  for (const h of rawHeaders) {\n    headers[h.name.toLowerCase()] = h.value;\n  }\n\n  // Extract body text (prefer plain text, fall back to html stripped)\n  let body = '';\n\n  function extractBody(part) {\n    if (!part) return '';\n    if (part.mimeType === 'text/plain' && part.body?.data) {\n      return Buffer.from(part.body.data, 'base64').toString('utf-8');\n    }\n    if (part.mimeType === 'text/html' && part.body?.data && !body) {\n      const html = Buffer.from(part.body.data, 'base64').toString('utf-8');\n      // Strip HTML tags for a plain text fallback\n      return html.replace(/<[^>]+>/g, ' ').replace(/\\s+/g, ' ').trim();\n    }\n    if (part.parts) {\n      for (const sub of part.parts) {\n        const result = extractBody(sub);\n        if (result) return result;\n      }\n    }\n    return '';\n  }\n\n  body = extractBody(msg.payload);\n\n  // Strip quoted reply chains (lines starting with > or \"On ... wrote:\")\n  const lines = body.split('\\n');\n  const cleanLines = [];\n  for (const line of lines) {\n    if (line.trim().startsWith('>')) break;\n    if (/^On .+ wrote:/.test(line.trim())) break;\n    cleanLines.push(line);\n  }\n  body = cleanLines.join('\\n').trim();\n\n  messages.push({\n    id:      msg.id,\n    subject: headers['subject'] ?? '(No Subject)',\n    from:    headers['from']    ?? 'Unknown',\n    to:      headers['to']      ?? '',\n    date:    headers['date']    ? new Date(headers['date']).toISOString() : new Date().toISOString(),\n    body:    body || '(no body content)'\n  });\n}\n\n// Sort oldest first\nmessages.sort((a, b) => new Date(a.date) - new Date(b.date));\n\nreturn [{ json: { messages, config } }];"
+      },
+      "name": "Parse & Clean Messages",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1120, 400]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Validate we have messages and prepare the shell command\nconst { messages, config } = $input.first().json;\n\nif (!messages || messages.length === 0) {\n  throw new Error(`No messages found for addresses: ${config.addresses.join(', ')}`);\n}\n\n// Write messages JSON to a temp file for the Python script\nconst fs = require('fs');\nconst tmpJsonPath = `/tmp/emails_${Date.now()}.json`;\nfs.writeFileSync(tmpJsonPath, JSON.stringify(messages, null, 2), 'utf-8');\n\n// Build the shell command\nconst cmd = `python3 /opt/n8n-scripts/email_to_pdf.py \\\n  --output \"${config.outputPath}\" \\\n  --addresses \"${config.addressList}\" \\\n  < \"${tmpJsonPath}\" \\\n  && echo SUCCESS \\\n  && rm -f \"${tmpJsonPath}\"`;\n\nreturn [{ json: { cmd, outputPath: config.outputPath, messageCount: messages.length, addresses: config.addresses } }];"
+      },
+      "name": "Prepare Shell Command",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1340, 400]
+    },
+    {
+      "parameters": {
+        "command": "={{ $json.cmd }}"
+      },
+      "name": "Generate PDF",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [1560, 400],
+      "notes": "Runs email_to_pdf.py. Place the script at /opt/n8n-scripts/email_to_pdf.py on your n8n server."
+    },
+    {
+      "parameters": {
+        "jsCode": "// Check execution result and build response\nconst result    = $input.first().json;\nconst prevNode  = $('Prepare Shell Command').first().json;\n\nconst success = (result.exitCode === 0) && result.stdout?.includes('SUCCESS');\n\nif (!success) {\n  throw new Error(`PDF generation failed:\\n${result.stderr || result.stdout}`);\n}\n\nreturn [{\n  json: {\n    success: true,\n    message: `PDF exported successfully`,\n    pdf_path: prevNode.outputPath,\n    message_count: prevNode.messageCount,\n    addresses: prevNode.addresses,\n    generated_at: new Date().toISOString()\n  }\n}];"
+      },
+      "name": "Build Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1780, 400]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json) }}"
+      },
+      "name": "Respond",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [2000, 400]
+    }
+  ],
+  "connections": {
+    "Webhook Trigger":          { "main": [[{ "node": "Parse Request",          "type": "main", "index": 0 }]] },
+    "Parse Request":            { "main": [[{ "node": "Build Gmail Query",       "type": "main", "index": 0 }]] },
+    "Build Gmail Query":        { "main": [[{ "node": "Fetch Gmail Messages",    "type": "main", "index": 0 }]] },
+    "Fetch Gmail Messages":     { "main": [[{ "node": "Parse & Clean Messages",  "type": "main", "index": 0 }]] },
+    "Parse & Clean Messages":   { "main": [[{ "node": "Prepare Shell Command",   "type": "main", "index": 0 }]] },
+    "Prepare Shell Command":    { "main": [[{ "node": "Generate PDF",            "type": "main", "index": 0 }]] },
+    "Generate PDF":             { "main": [[{ "node": "Build Response",          "type": "main", "index": 0 }]] },
+    "Build Response":           { "main": [[{ "node": "Respond",                 "type": "main", "index": 0 }]] }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}

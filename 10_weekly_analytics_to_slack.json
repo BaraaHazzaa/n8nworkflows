@@ -1,0 +1,48 @@
+{
+  "name": "Weekly Analytics Report → Slack",
+  "nodes": [
+    {
+      "parameters": { "rule": { "interval": [{ "field": "cronExpression", "expression": "0 9 * * 1" }] } },
+      "name": "Schedule (Mon 9am)",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "propertyId": "={{ $env.GA4_PROPERTY_ID }}",
+        "dateRanges": [{ "startDate": "7daysAgo", "endDate": "today" }],
+        "metrics": [{ "name": "sessions" }, { "name": "activeUsers" }, { "name": "bounceRate" }],
+        "dimensions": [{ "name": "date" }]
+      },
+      "name": "Fetch GA4 Data",
+      "type": "n8n-nodes-base.googleAnalytics",
+      "typeVersion": 1,
+      "position": [480, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const rows = items[0].json.rows || [];\nconst sessions = rows.reduce((s,r) => s + parseInt(r.metricValues[0].value), 0);\nconst users = rows.reduce((s,r) => s + parseInt(r.metricValues[1].value), 0);\nconst bounce = (rows.reduce((s,r) => s + parseFloat(r.metricValues[2].value), 0) / rows.length * 100).toFixed(1);\nreturn [{ json: { sessions, users, bounce } }];"
+      },
+      "name": "Summarise Stats",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [720, 300]
+    },
+    {
+      "parameters": {
+        "channel": "#marketing",
+        "text": "=📊 *Weekly Website Report*\n• Sessions: {{ $json.sessions }}\n• Users: {{ $json.users }}\n• Bounce Rate: {{ $json.bounce }}%"
+      },
+      "name": "Post to Slack",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2,
+      "position": [960, 300]
+    }
+  ],
+  "connections": {
+    "Schedule (Mon 9am)": { "main": [[{ "node": "Fetch GA4 Data", "type": "main", "index": 0 }]] },
+    "Fetch GA4 Data": { "main": [[{ "node": "Summarise Stats", "type": "main", "index": 0 }]] },
+    "Summarise Stats": { "main": [[{ "node": "Post to Slack", "type": "main", "index": 0 }]] }
+  }
+}

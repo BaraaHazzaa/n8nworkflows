@@ -1,0 +1,43 @@
+{
+  "name": "Airtable New Record → PDF Report + Email",
+  "nodes": [
+    {
+      "parameters": { "baseId": "={{ $env.AIRTABLE_BASE_ID }}", "tableId": "={{ $env.AIRTABLE_TABLE_ID }}", "triggerField": "Created" },
+      "name": "Airtable Trigger",
+      "type": "n8n-nodes-base.airtableTrigger",
+      "typeVersion": 1,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "url": "https://api.html2pdf.app/v1/generate",
+        "method": "POST",
+        "body": {
+          "html": "=<h1>Report: {{ $json.fields.Name }}</h1><p>Date: {{ $json.fields.Date }}</p><p>Notes: {{ $json.fields.Notes }}</p>",
+          "apiKey": "={{ $env.HTML2PDF_KEY }}"
+        },
+        "responseType": "buffer"
+      },
+      "name": "Generate PDF",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [480, 300]
+    },
+    {
+      "parameters": {
+        "toEmail": "={{ $node['Airtable Trigger'].json.fields.Email }}",
+        "subject": "=Your Report: {{ $node['Airtable Trigger'].json.fields.Name }}",
+        "text": "Please find your report attached.",
+        "attachments": "data"
+      },
+      "name": "Email with PDF",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2,
+      "position": [720, 300]
+    }
+  ],
+  "connections": {
+    "Airtable Trigger": { "main": [[{ "node": "Generate PDF", "type": "main", "index": 0 }]] },
+    "Generate PDF": { "main": [[{ "node": "Email with PDF", "type": "main", "index": 0 }]] }
+  }
+}

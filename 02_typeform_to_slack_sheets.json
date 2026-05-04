@@ -1,0 +1,41 @@
+{
+  "name": "Typeform Response → Slack + Google Sheets",
+  "nodes": [
+    {
+      "parameters": { "formId": "={{ $env.TYPEFORM_FORM_ID }}" },
+      "name": "Typeform Trigger",
+      "type": "n8n-nodes-base.typeformTrigger",
+      "typeVersion": 1,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "channel": "#leads",
+        "text": "=📥 New form submission!\n*Name:* {{ $json.answers[0].text }}\n*Email:* {{ $json.answers[1].email }}\n*Message:* {{ $json.answers[2].text }}"
+      },
+      "name": "Slack Notification",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2,
+      "position": [480, 200]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "spreadsheetId": "={{ $env.GOOGLE_SHEET_ID }}",
+        "sheetName": "Responses",
+        "columns": { "mappingMode": "autoMapInputData" }
+      },
+      "name": "Log to Sheets",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [480, 420]
+    }
+  ],
+  "connections": {
+    "Typeform Trigger": {
+      "main": [
+        [{ "node": "Slack Notification", "type": "main", "index": 0 }, { "node": "Log to Sheets", "type": "main", "index": 0 }]
+      ]
+    }
+  }
+}

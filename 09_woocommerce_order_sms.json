@@ -1,0 +1,45 @@
+{
+  "name": "WooCommerce New Order → Warehouse + SMS",
+  "nodes": [
+    {
+      "parameters": { "event": "order.created" },
+      "name": "WooCommerce Trigger",
+      "type": "n8n-nodes-base.wooCommerceTrigger",
+      "typeVersion": 1,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "url": "={{ $env.WAREHOUSE_WEBHOOK_URL }}",
+        "method": "POST",
+        "body": {
+          "order_id": "={{ $json.id }}",
+          "items": "={{ $json.line_items }}",
+          "shipping": "={{ $json.shipping }}"
+        }
+      },
+      "name": "Notify Warehouse",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [480, 200]
+    },
+    {
+      "parameters": {
+        "from": "={{ $env.TWILIO_FROM }}",
+        "to": "={{ $json.billing.phone }}",
+        "message": "=Hi {{ $json.billing.first_name }}! Your order #{{ $json.id }} has been received and is being processed. 🎉"
+      },
+      "name": "SMS Customer",
+      "type": "n8n-nodes-base.twilio",
+      "typeVersion": 1,
+      "position": [480, 420]
+    }
+  ],
+  "connections": {
+    "WooCommerce Trigger": {
+      "main": [
+        [{ "node": "Notify Warehouse", "type": "main", "index": 0 }, { "node": "SMS Customer", "type": "main", "index": 0 }]
+      ]
+    }
+  }
+}

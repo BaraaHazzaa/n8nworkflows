@@ -1,0 +1,48 @@
+{
+  "name": "Daily Morning Digest Email",
+  "nodes": [
+    {
+      "parameters": { "rule": { "interval": [{ "field": "cronExpression", "expression": "0 7 * * 1-5" }] } },
+      "name": "Schedule (7am weekdays)",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "url": "https://newsapi.org/v2/top-headlines",
+        "qs": { "apiKey": "={{ $env.NEWS_API_KEY }}", "category": "technology", "pageSize": 5 }
+      },
+      "name": "Fetch Top News",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [480, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const articles = items[0].json.articles;\nconst html = articles.map((a,i) => `<li><a href='${a.url}'>${a.title}</a> — ${a.source.name}</li>`).join('');\nreturn [{ json: { digest: `<ul>${html}</ul>`, date: new Date().toDateString() } }];"
+      },
+      "name": "Format Digest",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [720, 300]
+    },
+    {
+      "parameters": {
+        "fromEmail": "digest@yourdomain.com",
+        "toEmail": "={{ $env.MY_EMAIL }}",
+        "subject": "=☀️ Your Morning Digest – {{ $json.date }}",
+        "html": "=<h2>Top Tech News Today</h2>{{ $json.digest }}"
+      },
+      "name": "Send Email",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2,
+      "position": [960, 300]
+    }
+  ],
+  "connections": {
+    "Schedule (7am weekdays)": { "main": [[{ "node": "Fetch Top News", "type": "main", "index": 0 }]] },
+    "Fetch Top News": { "main": [[{ "node": "Format Digest", "type": "main", "index": 0 }]] },
+    "Format Digest": { "main": [[{ "node": "Send Email", "type": "main", "index": 0 }]] }
+  }
+}

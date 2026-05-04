@@ -1,0 +1,40 @@
+{
+  "name": "RSS Feed → Auto Tweet",
+  "nodes": [
+    {
+      "parameters": { "rule": { "interval": [{ "field": "hours", "hoursInterval": 2 }] } },
+      "name": "Schedule (Every 2h)",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1,
+      "position": [240, 300]
+    },
+    {
+      "parameters": { "url": "={{ $env.RSS_FEED_URL }}" },
+      "name": "Read RSS Feed",
+      "type": "n8n-nodes-base.rssFeedRead",
+      "typeVersion": 1,
+      "position": [480, 300]
+    },
+    {
+      "parameters": { "keepOnlySet": true, "values": { "number": [{ "name": "index", "value": 0 }] } },
+      "name": "Get Latest Item",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3,
+      "position": [720, 300]
+    },
+    {
+      "parameters": {
+        "text": "={{ $json.title }} {{ $json.link }} #automation #news"
+      },
+      "name": "Post Tweet",
+      "type": "n8n-nodes-base.twitter",
+      "typeVersion": 2,
+      "position": [960, 300]
+    }
+  ],
+  "connections": {
+    "Schedule (Every 2h)": { "main": [[{ "node": "Read RSS Feed", "type": "main", "index": 0 }]] },
+    "Read RSS Feed": { "main": [[{ "node": "Get Latest Item", "type": "main", "index": 0 }]] },
+    "Get Latest Item": { "main": [[{ "node": "Post Tweet", "type": "main", "index": 0 }]] }
+  }
+}
